@@ -1,0 +1,462 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QuickTap — Reaction Time Game</title>
+  <style>
+    :root {
+      --bg:#0f1220; --fg:#eaf0ff; --muted:#9aa3b2; --accent:#6cf;
+      --good:#3ddc97; --bad:#ff5c77; --warn:#ffd166;
+      --panel:#171a2c; --panel-2:#1f2340;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1000px 600px at 20% -10%, #1b2040, transparent), var(--bg);
+      color: var(--fg);
+      display:flex; min-height:100vh; align-items:center; justify-content:center;
+      padding:24px;
+    }
+    .app {
+      width: min(980px, 100%);
+      display:grid; gap:16px;
+      grid-template-columns: 1fr 340px;
+    }
+    @media (max-width: 900px){ .app { grid-template-columns: 1fr; } }
+
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border:1px solid rgba(255,255,255,0.06);
+      border-radius:14px; padding:16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .play-area {
+      display:flex; align-items:center; justify-content:center;
+      height: 440px; border-radius:12px; position:relative;
+      overflow:hidden; user-select:none; cursor:pointer;
+      transition: background 160ms ease, box-shadow 160ms ease;
+      outline: none;
+    }
+    .state-wait { background:#152033; }
+    .state-ready { background:#152033; }
+    .state-go { background:#15321d; box-shadow: inset 0 0 0 4px rgba(61,220,151,0.2); }
+    .state-false { background:#3a1220; }
+    .state-timeout { background:#332515; }
+
+    .big-text {
+      font-size: clamp(20px, 3.4vw, 44px);
+      font-weight: 700; letter-spacing: 0.2px; text-align:center; line-height:1.2;
+      padding: 0 16px;
+    }
+    .sub {
+      color: var(--muted); text-align:center; margin-top:10px; font-size:14px;
+    }
+
+    .topbar {
+      display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px;
+    }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill {
+      background: rgba(255,255,255,0.06); color: var(--fg);
+      border:1px solid rgba(255,255,255,0.08);
+      padding:10px 12px; border-radius:10px; font-weight:600; font-size:14px;
+    }
+    select, button {
+      appearance:none; border:none; outline:none;
+      background: rgba(255,255,255,0.06); color: var(--fg);
+      border:1px solid rgba(255,255,255,0.1);
+      padding:10px 12px; border-radius:10px; font-weight:600; font-size:14px;
+    }
+    button.primary { background: linear-gradient(180deg, #3a8dff, #2469ff); border: none; }
+    button.ghost { background: rgba(255,255,255,0.06); }
+
+    .stats {
+      display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-top:12px;
+    }
+    @media (max-width: 520px){ .stats { grid-template-columns: repeat(2,1fr); } }
+
+    .stat {
+      background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+      border-radius:10px; padding:10px 12px;
+    }
+    .stat .label { color: var(--muted); font-size:12px; }
+    .stat .value { font-weight:800; margin-top:4px; font-size:18px; }
+
+    .leader {
+      display:flex; flex-direction:column; gap:8px; margin-top:8px;
+      max-height: 360px; overflow:auto; padding-right:4px;
+    }
+    .entry {
+      display:grid; grid-template-columns: 32px 1fr 90px; gap:8px; align-items:center;
+      background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+      border-radius:10px; padding:8px 10px;
+    }
+    .entry .rank { color: var(--muted); text-align:center; font-weight:700; }
+    .entry .name { font-weight:700; }
+    .entry .ms { text-align:right; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .mini { font-size:12px; }
+    .hint { color: var(--muted); font-size:12px; margin-top:8px; }
+
+    .distraction {
+      position:absolute; pointer-events:none; opacity:0; transform: scale(0.9);
+      transition: opacity 120ms ease, transform 120ms ease;
+      border-radius: 999px; mix-blend-mode: screen;
+      box-shadow: 0 0 40px rgba(255,255,255,0.2);
+    }
+    .distraction.show { opacity:0.9; transform: scale(1); }
+
+    #medalDisplay span {
+      animation: glow 1.2s ease-out;
+    }
+    @keyframes glow {
+      0% { text-shadow: 0 0 0 transparent; }
+      50% { text-shadow: 0 0 12px rgba(255,255,255,0.6); }
+      100% { text-shadow: 0 0 0 transparent; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <div class="topbar">
+        <div class="row">
+          <span class="pill">QuickTap</span>
+          <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="muteBtn" class="ghost" aria-pressed="false">🔊 Sound on</button>
+          <button id="resetBtn" class="ghost">Reset stats</button>
+          <button id="startBtn" class="primary">Start</button>
+        </div>
+      </div>
+
+      <div id="playArea" class="play-area state-wait" tabindex="0" aria-live="polite" aria-label="Reaction test area">
+        <div class="big-text" id="status">Tap or press space to begin</div>
+        <div class="sub" id="substatus">Wait for green, then tap as fast as you can</div>
+        <div class="sub" id="medalDisplay" style="margin-top:8px;"></div>
+        <div id="distract" class="distraction"></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="label">Last</div><div class="value" id="last">—</div></div>
+        <div class="stat"><div class="label">Best</div><div class="value" id="best">—</div></div>
+        <div class="stat"><div class="label">Average</div><div class="value" id="avg">—</div></div>
+        <div class="stat"><div class="label">Rounds</div><div class="value" id="rounds">0</div></div>
+      </div>
+
+      <div class="hint">Tip: False start (tapping before green) gives a penalty and doesn’t count toward stats.</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px 0;">Leaderboard</h3>
+       <div class="mini muted">Local top 10 (fastest single reactions)</div>
+      <div id="leader" class="leader"></div>
+      <div class="hint">
+        Want a global board? Plug your API into <code>submitOnlineScore()</code> and <code>fetchOnlineLeaderboard()</code>.
+      </div>
+    </div>
+  </div>
+<script>
+const el = {
+  area: document.getElementById('playArea'),
+  status: document.getElementById('status'),
+  sub: document.getElementById('substatus'),
+  medalDisplay: document.getElementById('medalDisplay'),
+  last: document.getElementById('last'),
+  best: document.getElementById('best'),
+  avg: document.getElementById('avg'),
+  rounds: document.getElementById('rounds'),
+  leader: document.getElementById('leader'),
+  start: document.getElementById('startBtn'),
+  reset: document.getElementById('resetBtn'),
+  diff: document.getElementById('difficulty'),
+  mute: document.getElementById('muteBtn'),
+  distract: document.getElementById('distract'),
+  diffLabel: document.getElementById('difficultyLabel'),
+};
+
+const API_BASE = "https://reaction-game-backend.onrender.com";
+
+const MEDALS = [
+  { name: '🥇 Gold', threshold: 150, color: '#ffd700' },
+  { name: '🥈 Silver', threshold: 200, color: '#c0c0c0' },
+  { name: '🥉 Bronze', threshold: 250, color: '#cd7f32' }
+];
+
+const DIFF = {
+  easy:   { delayMin: 800, delayMax: 2000, timeout: 3000, falsePenalty: 80 },
+  normal: { delayMin: 1000, delayMax: 3000, timeout: 2500, falsePenalty: 120 },
+  hard:   { delayMin: 1200, delayMax: 4200, timeout: 2000, falsePenalty: 150 },
+};
+
+const STATE = {
+  phase: 'idle',
+  tReady: 0,
+  timer: 0,
+  waitTimer: 0,
+  lastTimes: [],
+  best: null,
+  rounds: 0,
+  last: null,
+  falseStarts: 0,
+  submitted: false,
+};
+
+const AudioKit = (() => {
+  let ctx, muted = false;
+  function ensure() { if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+  function tone(freq=880, dur=0.08, type='sine', gain=0.05) {
+    if (muted) return;
+    ensure();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    g.gain.setValueAtTime(gain, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(now); osc.stop(now + dur);
+  }
+  return {
+    beep: () => tone(880, 0.06, 'sine', 0.06),
+    success: () => { tone(740, 0.05, 'triangle', 0.05); setTimeout(()=>tone(1160,0.07,'triangle',0.05), 50); },
+    buzz: () => tone(120, 0.18, 'square', 0.08),
+    timeout: () => tone(300, 0.25, 'sawtooth', 0.05),
+    toggleMute(btn){
+      muted = !muted;
+      btn.textContent = muted ? '🔈 Sound off' : '🔊 Sound on';
+      btn.setAttribute('aria-pressed', String(!muted));
+    },
+    resume(){ ensure(); }
+  };
+})();
+
+function setPhase(phase){
+  STATE.phase = phase;
+  el.area.className = `play-area state-${phase}`;
+}
+
+function updateStatsUI(){
+  el.last.textContent = STATE.last ? `${STATE.last} ms` : '—';
+  el.best.textContent = STATE.best ? `${STATE.best} ms` : '—';
+  const avg = STATE.lastTimes.length
+    ? Math.round(STATE.lastTimes.reduce((a,b)=>a+b,0)/STATE.lastTimes.length)
+    : null;
+  el.avg.textContent = avg ? `${avg} ms` : '—';
+  el.rounds.textContent = String(STATE.rounds);
+}
+
+function resetStats(){
+  STATE.lastTimes = [];
+  STATE.best = null;
+  STATE.rounds = 0;
+  STATE.last = null;
+  STATE.falseStarts = 0;
+  STATE.submitted = false;
+  localStorage.removeItem('qtap_leader');
+  renderLB();
+  updateStatsUI();
+  setPhase('idle');
+  el.status.textContent = 'Tap or press space to begin';
+  el.sub.textContent = 'Wait for green, then tap as fast as you can';
+  el.medalDisplay.textContent = '';
+}
+
+function scheduleGo(profile){
+  const delay = Math.floor(Math.random() * (profile.delayMax - profile.delayMin)) + profile.delayMin;
+  STATE.waitTimer = setTimeout(()=>{
+    if (STATE.phase !== 'waiting') return;
+    setPhase('go');
+    STATE.tReady = performance.now();
+    el.status.textContent = 'GO!';
+    el.sub.textContent = 'Tap now!';
+    AudioKit.success();
+    STATE.timer = setTimeout(()=>{
+      if (STATE.phase !== 'go') return;
+      setPhase('timeout');
+      el.status.textContent = 'Too slow';
+      el.sub.textContent = 'Try again';
+      el.medalDisplay.textContent = '';
+      AudioKit.timeout();
+      setTimeout(readyForNext, 700);
+    }, profile.timeout);
+  }, delay);
+}
+
+function startRound(){
+  const profile = DIFF[el.diff.value];
+  clearTimeout(STATE.timer); clearTimeout(STATE.waitTimer);
+  setPhase('waiting');
+  el.status.textContent = 'Wait for green...';
+  el.sub.textContent = 'Don’t click early';
+  el.medalDisplay.textContent = '';
+  STATE.tReady = 0;
+  STATE.submitted = false;
+  AudioKit.beep();
+  scheduleGo(profile);
+}
+
+function handleTap(){
+  const profile = DIFF[el.diff.value];
+  if (STATE.phase === 'idle'){ startRound(); return; }
+  if (STATE.phase === 'waiting'){
+    clearTimeout(STATE.waitTimer);
+    setPhase('false');
+    STATE.falseStarts++;
+    el.status.textContent = 'False start';
+    el.sub.textContent = `Penalty: +${profile.falsePenalty} ms`;
+    el.medalDisplay.textContent = '';
+    AudioKit.buzz();
+    setTimeout(readyForNext, 600);
+    return;
+  }
+  if (STATE.phase === 'go'){
+    clearTimeout(STATE.timer);
+    const now = performance.now();
+    let ms = Math.round(now - STATE.tReady);
+    setPhase('locked');
+    el.status.textContent = `${ms} ms`;
+    el.sub.textContent = 'Nice!';
+    AudioKit.success();
+    STATE.last = ms;
+    STATE.rounds++;
+    STATE.lastTimes.push(ms);
+    if (STATE.best == null || ms < STATE.best) {
+      STATE.best = ms;
+      setTimeout(()=> {
+        const initials = prompt('New best! Enter initials for leaderboard:', 'YOU');
+        if (initials) {
+          addToLB(initials, ms);
+          if (!STATE.submitted) {
+            STATE.submitted = true;
+            submitOnlineScore(initials, ms).catch(()=>{});
+          }
+        }
+      }, 50);
+    }
+    updateStatsUI();
+    let medal = null;
+    for (const m of MEDALS) {
+      if (ms <= m.threshold) {
+        medal = m;
+        break;
+      }
+    }
+    el.medalDisplay.innerHTML = medal
+      ? `<span style="color:${medal.color}; font-weight:600;">${medal.name}</span> for ${ms} ms`
+      : `<span style="color:#999;">⏱️ No medal</span>`;
+    setTimeout(readyForNext, 700);
+    return;
+  }
+}
+
+function readyForNext(){
+  setPhase('idle');
+  el.status.textContent = 'Tap or press space to begin';
+  el.sub.textContent = 'Wait for green, then tap as fast as you can';
+  el.medalDisplay.textContent = '';
+  STATE.submitted = false;
+}
+
+function getLB(){
+  try { return JSON.parse(localStorage.getItem('qtap_leader') || '[]'); } catch(e){ return []; }
+}
+function setLB(arr){ localStorage.setItem('qtap_leader', JSON.stringify(arr)); }
+function addToLB(name, ms){
+  const lb = getLB();
+  lb.push({ name: name.slice(0,10), ms, ts: Date.now() });
+  lb.sort((a,b)=> a.ms - b.ms);
+  setLB(lb.slice(0,10));
+  renderLB();
+}
+function renderLB(){
+  const lb = getLB();
+  el.leader.innerHTML = '';
+  if (!lb.length){
+    const d = document.createElement('div');
+    d.className = 'muted mini';
+    d.textContent = 'Play a round to set your first score.';
+       el.leader.appendChild(d);
+    return;
+  }
+  lb.forEach((row, i)=>{
+    const item = document.createElement('div');
+    item.className = 'entry';
+    const rank = document.createElement('div');
+    rank.className = 'rank'; rank.textContent = i+1;
+    const name = document.createElement('div');
+    name.className = 'name'; name.textContent = row.name;
+    const ms = document.createElement('div');
+    ms.className = 'ms'; ms.textContent = `${row.ms} ms`;
+    item.append(rank, name, ms);
+    el.leader.appendChild(item);
+  });
+}
+
+// 🌍 Global leaderboard API hooks
+async function submitOnlineScore(name, ms){
+  try {
+    await fetch(`${API_BASE}/scores`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, ms })
+    });
+  } catch (e) {
+    console.warn('Global score submit failed:', e);
+  }
+}
+
+async function fetchOnlineLeaderboard(){
+  try {
+    const res = await fetch(`${API_BASE}/scores/top`);
+    const data = await res.json();
+    el.leader.innerHTML = '';
+    data.forEach((row, i) => {
+      const item = document.createElement('div');
+      item.className = 'entry';
+      const rank = document.createElement('div');
+      rank.className = 'rank'; rank.textContent = i + 1;
+      const name = document.createElement('div');
+      name.className = 'name'; name.textContent = row.name;
+      const ms = document.createElement('div');
+      ms.className = 'ms'; ms.textContent = `${row.ms} ms`;
+      item.append(rank, name, ms);
+      el.leader.appendChild(item);
+    });
+  } catch (e) {
+    console.warn('Global leaderboard fetch failed:', e);
+  }
+}
+
+// 🎮 Event listeners
+el.start.addEventListener('click', ()=> startRound());
+el.area.addEventListener('click', handleTap);
+el.area.addEventListener('keydown', (e)=> {
+  if (e.code === 'Space' || e.code === 'Enter') {
+    e.preventDefault(); handleTap();
+  }
+});
+el.reset.addEventListener('click', resetStats);
+el.mute.addEventListener('click', ()=> AudioKit.toggleMute(el.mute));
+el.diff.addEventListener('change', ()=> {
+  AudioKit.beep();
+  el.diffLabel.textContent = `Difficulty: ${el.diff.value}`;
+});
+
+// Unlock audio on first interaction (iOS fix)
+document.addEventListener('click', ()=> AudioKit.resume(), { once: true });
+
+// 🚀 Initialize
+renderLB();
+updateStatsUI();
+el.diffLabel.textContent = `Difficulty: ${el.diff.value}`;
+fetchOnlineLeaderboard();
+</script>
